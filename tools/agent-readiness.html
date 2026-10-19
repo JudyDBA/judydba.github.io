@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>에이전트 준비도 셀프 진단 — 15문항</title>
+<meta name="description" content="내 시스템은 AI 에이전트가 일할 수 있는 구조인가? 재현·명령·설정·헤드리스·수치 평가 15문항, 3분.">
+<link rel="icon" href="data:,"><link rel="stylesheet" href="/style.css">
+<style>
+ .q{border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:10px 0}
+ .q p{margin:0 0 8px}
+ .opts{display:flex;gap:8px;flex-wrap:wrap}
+ .opts label{border:1px solid var(--line);border-radius:999px;padding:6px 14px;cursor:pointer;font-size:.95rem}
+ .opts input{display:none}
+ .opts input:checked+span{font-weight:700}
+ .opts label:has(input:checked){background:var(--accent);color:#fff;border-color:var(--accent)}
+ .area h3{margin:28px 0 4px}.area small{color:var(--muted)}
+ .bar{height:10px;background:var(--line);border-radius:6px;overflow:hidden}
+ .bar i{display:block;height:100%;background:var(--accent)}
+ .row{display:grid;grid-template-columns:90px 1fr 48px;gap:10px;align-items:center;margin:6px 0}
+ #result{display:none;margin-top:28px;border-top:2px solid var(--accent);padding-top:18px}
+ .lvl{font-size:1.4rem;font-weight:700}
+ button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:12px 20px;font-size:1rem;cursor:pointer}
+ button.ghost{background:none;color:var(--accent);border:1px solid var(--accent)}
+ .err{color:#c0392b}
+ @media print{.q,.area h3,.area small,#go,.noprint{display:none!important}#result{display:block!important}}
+</style>
+</head>
+<body>
+<main class="wrap">
+<p class="noprint"><a href="/">← 글 목록</a></p>
+<h1>에이전트 준비도 셀프 진단</h1>
+<p>내 시스템이 AI 에이전트가 <b>보고, 만지고, 판정할 수 있는</b> 구조인지 15문항으로 점검합니다. 3분 정도 걸리고, 입력한 내용은 <b>브라우저 밖으로 전송되지 않습니다.</b> 배경 설명은 <a href="/posts/02-agent-ready-systems.html">이 글</a>에 있습니다.</p>
+<form id="f"></form>
+<p id="msg" class="err"></p>
+<p><button id="go" type="button">결과 보기</button></p>
+<section id="result" aria-live="polite"></section>
+</main>
+<script src="/tools/agent-readiness.js"></script>
+<script>
+// innerHTML/insertAdjacentHTML에는 고정 문항(agent-readiness.js 상수)과 숫자 점수만 들어간다. 사용자 자유 입력은 없음 → XSS 경로 없음.
+const CONTACT = ""; // 빌드 시 site.config.json의 contact_email로 치환
+const f = document.getElementById("f");
+const LABELS = [["아니오",0],["부분적으로",1],["예",2]];
+let n = 0;
+AgentReadiness.AREAS.forEach(a => {
+  const d = document.createElement("div"); d.className = "area";
+  d.innerHTML = `<h3>${a.name}</h3><small>${a.hint}</small>`;
+  a.qs.forEach(q => {
+    const i = n++;
+    d.insertAdjacentHTML("beforeend", `<div class="q"><p>${i+1}. ${q}</p><div class="opts">${
+      LABELS.map(([l,v]) => `<label><input type="radio" name="q${i}" value="${v}"><span>${l}</span></label>`).join("")}</div></div>`);
+  });
+  f.appendChild(d);
+});
+document.getElementById("go").onclick = () => {
+  const ans = [];
+  for (let i = 0; i < 15; i++) {
+    const c = f.querySelector(`input[name=q${i}]:checked`);
+    if (!c) { document.getElementById("msg").textContent = `${i+1}번 문항에 답해주세요.`; f.querySelector(`input[name=q${i}]`).closest(".q").scrollIntoView({behavior:"smooth",block:"center"}); return; }
+    ans.push(Number(c.value));
+  }
+  document.getElementById("msg").textContent = "";
+  const r = AgentReadiness.score(ans);
+  const rows = r.areas.map(a => `<div class="row"><span>${a.name}</span><div class="bar"><i style="width:${a.pct}%"></i></div><span>${a.score}/6</span></div>`).join("");
+  const weak = r.weakest.length===0 ? "<li>다섯 영역 모두 만점입니다. 이제 위임 범위를 넓힐 차례입니다.</li>" : r.weakest.map((w,i) => `<li><b>${w.name}</b> (${w.score}/6) — ${w.first}</li>`).join("");
+  const body = encodeURIComponent(`에이전트 준비도 진단 결과\n총점 ${r.total}/30 (${r.pct}%) · ${r.level.key} ${r.level.name}\n`+
+    r.areas.map(a=>`- ${a.name}: ${a.score}/6`).join("\n")+`\n\n가장 약한 영역: ${r.weakest.map(w=>w.name).join(", ")}\n\n(상황을 한두 줄 적어주시면 무료 30분 상담 때 참고하겠습니다)\n`);
+  const cta = CONTACT.includes("@")
+    ? `<p class="noprint"><a href="mailto:${CONTACT}?subject=${encodeURIComponent("[에이전트 준비도] 무료 30분 상담 요청")}&body=${body}"><button type="button">결과로 무료 30분 상담 요청</button></a></p>`
+    : "";
+  const out = document.getElementById("result");
+  out.innerHTML = `<h2>결과</h2>
+   <p class="lvl">${r.level.key} · ${r.level.name} — ${r.total}/30점 (${r.pct}%)</p>
+   <p>${r.level.desc}</p>${rows}
+   <h3>먼저 손댈 곳</h3><ol>${weak}</ol>
+   <p><small>권장 순서는 보통 수치 평가 → 재현성 → 명령화·설정 분리 → 헤드리스입니다. 다섯 개를 한 번에 갖출 필요는 없습니다.</small></p>
+   ${cta}
+   <p class="noprint"><button class="ghost" type="button" onclick="window.print()">결과 PDF로 저장</button></p>`;
+  out.style.display = "block"; out.scrollIntoView({behavior:"smooth"});
+};
+</script>
+</body>
+</html>

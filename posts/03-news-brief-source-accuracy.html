@@ -1,0 +1,72 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>뉴스 브리프 AI가 출처를 지어내지 않게 만든 방법</title>
+<meta name="description" content="프롬프트를 아무리 고쳐도 안 잡히던 출처 불일치를, 검사 스크립트 하나와 컨텍스트 설정 하나로 잡은 기록. 실측 수치 포함."><meta property="og:title" content="뉴스 브리프 AI가 출처를 지어내지 않게 만든 방법">
+<meta property="og:description" content="프롬프트를 아무리 고쳐도 안 잡히던 출처 불일치를, 검사 스크립트 하나와 컨텍스트 설정 하나로 잡은 기록. 실측 수치 포함."><meta property="og:url" content="https://judydba.github.io/posts/03-news-brief-source-accuracy.html">
+<link rel="icon" href="data:,"><link rel="stylesheet" href="/style.css"></head><body><main class="wrap"><p><a href="/">← 글 목록</a></p><article><h1>뉴스 브리프 AI가 출처를 지어내지 않게 만든 방법</h1>
+<p class="meta">2026-10-26</p><p>매일 밤 뉴스 브리프를 만들어 텔레그램으로 받는다. 에이전트가 검색하고, 요약하고, 항목마다 <code>[Source: …]</code>를 붙인다. 형식상으로는 완벽했다. 리뷰 단계도 &quot;출처 28건 확인 ✅&quot;이라고 통과시켰다.</p>
+<p>그런데 링크를 눌러보면 내용이 안 맞았다.</p>
+<h2>무슨 일이 있었나</h2>
+<p>하루치 실행 기록을 열어 항목과 출처를 하나씩 대조했다. 문제는 네 종류였다.</p>
+<ul>
+<li><strong>수치와 출처 불일치</strong>: 국내 증시 수치에 몇 달 전 해외 기사가, 반도체 이야기에 엉뚱한 종목 시세 페이지가 붙어 있었다.</li>
+<li><strong>지난 뉴스 재사용</strong>: 전날 브리프의 항목이 날짜만 바뀌어 다시 나왔다.</li>
+<li><strong>도메인만 남은 출처</strong>: 전송 단계에서 URL이 <code>yna.co.kr</code>처럼 도메인으로 줄어, 사람이 확인할 방법이 없었다.</li>
+<li><strong>리뷰어의 착시</strong>: 리뷰 스크립트는 <code>[Source:</code>의 <strong>개수</strong>만 셌다. 28개가 있으니 통과. 맞는지는 보지 않았다.</li>
+</ul>
+<p>마지막이 핵심이었다. 검증이 있다고 믿었지만, 실제로는 형식만 검증하고 있었다.</p>
+<h2>1단계: 판정 기준을 코드로</h2>
+<p>프롬프트에 &quot;출처를 정확히 달아라&quot;를 더 세게 쓰는 대신, 판정을 스크립트로 옮겼다. 항목마다 세 가지를 본다.</p>
+<ol>
+<li>출처가 <strong>전체 URL</strong>인가 (도메인만이면 실패)</li>
+<li>그 URL이 <strong>실제로 열리는가</strong></li>
+<li><strong>지난 3회 브리프</strong>의 URL·항목과 겹치지 않는가</li>
+</ol>
+<p>실패하면 에이전트가 고치거나 그 항목을 지운다. 최대 3번까지. 그래도 남으면 삭제.</p>
+<p>여기서 한 번 헛발을 디뎠다. 처음엔 링크 확인을 HEAD 요청으로 했는데, 국내 언론사 몇 곳이 HEAD에만 404를 돌려줬다. 멀쩡한 기사를 &quot;없는 기사&quot;로 판정했고, 나는 그걸 보고 &quot;에이전트가 주소를 지어냈다&quot;고 잘못 말하기까지 했다. GET으로 바꾸고, 봇 차단 응답(401·403·429)은 &quot;존재함&quot;으로 보도록 고쳤다. <strong>검사기도 검사가 필요하다.</strong></p>
+<h2>2단계: 출처를 먼저 박제</h2>
+<p>두 번째 규칙은 순서다. 검색 직후, 쓸 만한 기사의 <code>제목 | 날짜 | 전체 URL</code>을 파일(<code>sources.md</code>)에 먼저 저장하게 했다. 본문을 쓸 때는 <strong>그 목록에 있는 URL만</strong> 쓸 수 있다. 기억에서 그럴듯한 링크를 꺼내 쓰는 길을 막은 것이다. 이전 출력 파일도 읽지 못하게 했다. 재사용의 원천이었다.</p>
+<h2>3단계: 왜 이렇게 느렸나</h2>
+<p>규칙을 넣고 돌렸더니 이번엔 시간이 문제였다. 한 번 실행에 7분 제한을 넘겨 죽었다. 로그를 보니 원인은 엉뚱한 곳에 있었다. 설정의 컨텍스트 길이가 65,536 토큰으로 고정돼 있었는데, 실제 모델은 훨씬 더 받을 수 있었다. 그래서 대화가 약 59K에 닿을 때마다 <strong>압축</strong>이 일어났다(한 번에 48초, 104초, 66초). 압축되면서 검색 결과가 사라지고, 에이전트는 다시 검색했다. 느린 데다 출처까지 흔들린 이유였다.</p>
+<p>컨텍스트 길이를 200,000으로 올리고 다시 쟀다.</p>
+<table>
+<thead>
+<tr>
+<th>실행</th>
+<th>소요</th>
+<th>압축</th>
+<th>출처</th>
+<th>실패</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1차</td>
+<td>3분 24초</td>
+<td>0회</td>
+<td>19개</td>
+<td>0건</td>
+</tr>
+<tr>
+<td>2차</td>
+<td>2분 21초</td>
+<td>0회</td>
+<td>18개</td>
+<td>0건</td>
+</tr>
+<tr>
+<td>AI 뉴스(같은 방식 적용)</td>
+<td>1분 20초</td>
+<td>0회</td>
+<td>7개</td>
+<td>0건</td>
+</tr>
+</tbody></table>
+<h2>배운 것</h2>
+<ul>
+<li><strong>&quot;검증이 있다&quot;와 &quot;검증이 맞다&quot;는 다르다.</strong> 개수를 세는 리뷰는 리뷰가 아니다.</li>
+<li><strong>프롬프트로 안 되는 건 판정 기준으로.</strong> 규칙을 말로 강조하는 것보다, 통과/실패를 코드가 정하고 실패를 되돌려 보내는 루프가 훨씬 강하다.</li>
+<li><strong>검사기도 틀린다.</strong> HEAD 404 오탐처럼, 판정 도구 자체를 실제 데이터로 한 번은 검증해야 한다.</li>
+<li><strong>느림은 품질 문제의 신호일 수 있다.</strong> 압축이 반복되면 에이전트는 기억을 잃고, 잃은 자리를 그럴듯한 것으로 채운다.</li>
+</ul>
+<p>에이전트에게 일을 맡길 때 내가 가장 먼저 보는 것도 이것이다. 결과를 숫자로 판정할 수 있는가. 지난 글의 다섯 가지 점검 중 5번이 바로 이 이야기다.</p>
+</article>
+<footer><p>JudyDBA · AI 에이전트가 일할 수 있는 시스템을 만들고, 결과를 숫자로 검증한 기록</p></footer></main></body></html>
